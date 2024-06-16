@@ -15,20 +15,21 @@ import (
 	"net/http"
 	"os"
 	"path/filepath"
-	"strings"
 	"time"
 
 	_ "github.com/mattn/go-sqlite3"
 	"github.com/nfnt/resize"
-	"github.com/rwcarlsen/goexif/exif"
 )
 
 func main() {
 	fs := http.FileServer(http.Dir("../client/dist"))
+	thumbnailServer := http.FileServer(http.Dir("./thumbnails"))
 
-	http.HandleFunc("/index", indexImagesHandler)
+
+	http.HandleFunc("/index", indexFilesHandler)
 	http.HandleFunc("/images", getImagesHandler)
 	http.Handle("/", fs)
+    http.Handle("/thumbnails/", http.StripPrefix("/thumbnails/", thumbnailServer))
 
 	log.Println("Listening on :8080...")
 	err := http.ListenAndServe(":8080", nil)
@@ -39,7 +40,7 @@ func main() {
 
 /******* handlers  *********/
 
-func indexImagesHandler(w http.ResponseWriter, r *http.Request) {
+func indexFilesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
 		return
@@ -71,82 +72,58 @@ func indexImagesHandler(w http.ResponseWriter, r *http.Request) {
 }
 
 func getImagesHandler(w http.ResponseWriter, r *http.Request) {
-    db, err := sql.Open("sqlite3", "./imagedb.db")
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer db.Close()
+	db, err := sql.Open("sqlite3", "./imagedb.db")
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer db.Close()
 
-    query := `SELECT
+	query := `SELECT
                 id, file_name, file_path, file_size, file_format, date_created, date_modified, 
-                hash, thumbnail_path, dimensions, resolution, color_depth, date_taken, 
-                camera_make, camera_model, lens_make, lens_model, focal_length, aperture, 
-                shutter_speed, iso, exposure_comp, flash, latitude, longitude, altitude, 
-                title, tags, description, categories, people, histogram_data, compression, 
-                color_profile, rating, usage_rights, comments 
-              FROM images`
+                hash, thumbnail_path
+              FROM files`
 
-    rows, err := db.Query(query)
-    if err != nil {
-        http.Error(w, err.Error(), http.StatusInternalServerError)
-        return
-    }
-    defer rows.Close()
+	rows, err := db.Query(query)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	defer rows.Close()
 
-    var images []ImageMetadata
-    for rows.Next() {
-        var img ImageMetadata
-        var id int              // Temporary variable for the id field
-        var dateCreated, dateModified string // Temporary strings for dates
-        var tags, categories, people, comments string
+	var files []IndexedFile
+	for rows.Next() {
+		var img IndexedFile
+		var id int                           // Temporary variable for the id field
+		var dateCreated, dateModified string // Temporary strings for dates
 
-        err = rows.Scan(
-            &id, &img.FileName, &img.FilePath, &img.FileSize, &img.FileFormat, 
-            &dateCreated, &dateModified, &img.Hash, &img.ThumbnailPath, 
-            &img.Dimensions, &img.Resolution, &img.ColorDepth, &img.DateTaken,
-            &img.CameraMake, &img.CameraModel, &img.LensMake, &img.LensModel, 
-            &img.FocalLength, &img.Aperture, &img.ShutterSpeed, &img.ISO, 
-            &img.ExposureComp, &img.Flash, &img.Latitude, &img.Longitude, 
-            &img.Altitude, &img.Title, &tags, &img.Description, 
-            &categories, &people, &img.HistogramData, &img.Compression,
-            &img.ColorProfile, &img.Rating, &img.UsageRights, &comments)
-        if err != nil {
-            http.Error(w, err.Error(), http.StatusInternalServerError)
-            return
-        }
+		err = rows.Scan(
+			&id, &img.FileName, &img.FilePath, &img.FileSize, &img.FileFormat,
+			&dateCreated, &dateModified, &img.Hash, &img.ThumbnailPath)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
 
-        // Parse date strings into time.Time values
-        img.DateCreated, err = time.Parse(time.RFC3339, dateCreated)
-        if err != nil {
-            http.Error(w, "Invalid date_created format", http.StatusInternalServerError)
-            return
-        }
+		// Parse date strings into time.Time values
+		img.DateCreated, err = time.Parse(time.RFC3339, dateCreated)
+		if err != nil {
+			http.Error(w, "Invalid date_created format", http.StatusInternalServerError)
+			return
+		}
 
-        img.DateModified, err = time.Parse(time.RFC3339, dateModified)
-        if err != nil {
-            http.Error(w, "Invalid date_modified format", http.StatusInternalServerError)
-            return
-        }
+		img.DateModified, err = time.Parse(time.RFC3339, dateModified)
+		if err != nil {
+			http.Error(w, "Invalid date_modified format", http.StatusInternalServerError)
+			return
+		}
 
-        // No need to check for empty string, sql.NullTime will handle null values
-        if img.DateTaken.Valid {
-            img.DateTaken.Time = img.DateTaken.Time // DateTaken is already accessible through the time field
-        }
+		files = append(files, img)
+	}
 
-        // Parse the string fields into slices
-        img.Tags = strings.Split(tags, ",")
-        img.Categories = strings.Split(categories, ",")
-        img.People = strings.Split(people, ",")
-        img.Comments = strings.Split(comments, ",")
-
-        images = append(images, img)
-    }
-
-    w.Header().Set("Content-Type", "application/json")
-    json.NewEncoder(w).Encode(images)
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(files)
 }
-
 
 /*
 ****
@@ -154,10 +131,10 @@ FUNCTIONS
 ***
 */
 func nilIfNullTime(t sql.NullTime) interface{} {
-    if !t.Valid {
-        return nil
-    }
-    return t.Time.Format(time.RFC3339)
+	if !t.Valid {
+		return nil
+	}
+	return t.Time.Format(time.RFC3339)
 }
 
 func generateThumbnail(filePath string) (string, error) {
@@ -230,14 +207,14 @@ func createImageHash(filePath string) (string, error) {
 }
 
 func indexDirectory(path string, reindex bool) error {
-    db, err := sql.Open("sqlite3", "./imagedb.db")
-    if err != nil {
-        return err
-    }
-    defer db.Close()
+	db, err := sql.Open("sqlite3", "./imagedb.db")
+	if err != nil {
+		return err
+	}
+	defer db.Close()
 
-    createTableQuery := `
-    CREATE TABLE IF NOT EXISTS images (
+	createTableQuery := `
+    CREATE TABLE IF NOT EXISTS files (
 		id INTEGER PRIMARY KEY,
 		file_name TEXT NOT NULL,
 		file_path TEXT NOT NULL,
@@ -246,85 +223,57 @@ func indexDirectory(path string, reindex bool) error {
 		date_created TEXT NOT NULL,
 		date_modified TEXT NOT NULL,
 		hash TEXT NOT NULL,
-		thumbnail_path TEXT NOT NULL,
-		dimensions TEXT,
-		resolution TEXT,
-		color_depth TEXT,
-		date_taken TEXT, -- This field can be NULL
-		camera_make TEXT,
-		camera_model TEXT,
-		lens_make TEXT,
-		lens_model TEXT,
-		focal_length TEXT,
-		aperture TEXT,
-		shutter_speed TEXT,
-		iso TEXT,
-		exposure_comp TEXT,
-		flash TEXT,
-		latitude TEXT,
-		longitude TEXT,
-		altitude TEXT,
-		title TEXT,
-		tags TEXT,
-		description TEXT,
-		categories TEXT,
-		people TEXT,
-		histogram_data TEXT,
-		compression TEXT,
-		color_profile TEXT,
-		rating INTEGER,
-		usage_rights TEXT,
-		comments TEXT
+		thumbnail_path TEXT NOT NULL
 	);`
 
-    _, err = db.Exec(createTableQuery)
-    if err != nil {
-        return err
-    }
+	_, err = db.Exec(createTableQuery)
+	if err != nil {
+		return err
+	}
 
-    err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
-        if err != nil {
-            return err
-        }
+	err = filepath.Walk(path, func(filePath string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
 
-        if !info.IsDir() {
-            hash, err := createImageHash(filePath)
-            if err != nil {
-                log.Println("Error creating hash for file:", err)
-                return nil
-            }
+		if !info.IsDir() {
+			hash, err := createImageHash(filePath)
+			if err != nil {
+				log.Println("Error creating hash for file:", err)
+				return nil
+			}
 
-            var existingID int
+			var existingID int
 
-            if !reindex {
-                err = db.QueryRow("SELECT id FROM images WHERE hash = ?", hash).Scan(&existingID)
+			if !reindex {
+				err = db.QueryRow("SELECT id FROM images WHERE hash = ?", hash).Scan(&existingID)
 
-                if err == nil {
-                    log.Println("Duplicate image found; skipping:", filePath)
-                    return nil
-                }
+				if err == nil {
+					log.Println("Duplicate image found; skipping:", filePath)
+					return nil
+				}
 
-                if err != sql.ErrNoRows {
-                    log.Println("Error checking for duplicate hash:", err)
-                    return err
-                }
+				if err != sql.ErrNoRows {
+					log.Println("Error checking for duplicate hash:", err)
+					return err
+				}
 
-            }
+			}
 
-            thumbnailPath, err := generateThumbnail(filePath)
-            if err != nil {
-                log.Println("Error generating thumbnail for file:", err)
-                return nil
-            }
+			thumbnailPath, err := generateThumbnail(filePath)
+			if err != nil {
+				log.Println("Error generating thumbnail for file:", err)
+				return nil
+			}
 
-            f, err := os.Open(filePath)
-            if err != nil {
-                log.Println("Error opening file:", err)
-                return nil
-            }
-            defer f.Close()
+			f, err := os.Open(filePath)
+			if err != nil {
+				log.Println("Error opening file:", err)
+				return nil
+			}
+			defer f.Close()
 
-			meta := ImageMetadata{
+			meta := IndexedFile{
 				FileName:      info.Name(),
 				FilePath:      filePath,
 				FileSize:      info.Size(),
@@ -334,96 +283,38 @@ func indexDirectory(path string, reindex bool) error {
 				Hash:          hash,
 				ThumbnailPath: thumbnailPath,
 			}
-			
-			exifData, err := exif.Decode(f)
-			if err == nil {
-				if camMake, err := exifData.Get(exif.Make); err == nil {
-					makeStr := camMake.String()
-					meta.CameraMake = &makeStr
-				}
-				if camModel, err := exifData.Get(exif.Model); err == nil {
-					modelStr := camModel.String()
-					meta.CameraModel = &modelStr
-				}
-				if dateTaken, err := exifData.DateTime(); err == nil {
-					meta.DateTaken = sql.NullTime{Time: dateTaken, Valid: true}
-				} else {
-					meta.DateTaken = sql.NullTime{Valid: false}
-				}
-			} else {
-				meta.DateTaken = sql.NullTime{Valid: false}
+
+			insertQuery := `
+		    INSERT INTO files (
+		        file_name, file_path, file_size, file_format, date_created, date_modified, hash, thumbnail_path
+		    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
+
+			_, err = db.Exec(insertQuery,
+				meta.FileName, meta.FilePath, meta.FileSize, meta.FileFormat,
+				meta.DateCreated.Format(time.RFC3339), meta.DateModified.Format(time.RFC3339),
+				meta.Hash, meta.ThumbnailPath)
+
+			if err != nil {
+				log.Println("Error storing metadata in database:", err)
+				return nil
 			}
-			
+		}
+		return nil
+	})
 
-		            insertQuery := `
-		    INSERT INTO images (
-		        file_name, file_path, file_size, file_format, date_created, date_modified, hash, thumbnail_path, dimensions, resolution, color_depth, 
-		        date_taken, camera_make, camera_model, lens_make, lens_model, focal_length, aperture, shutter_speed, iso, exposure_comp, flash, 
-		        latitude, longitude, altitude, title, tags, description, categories, people, histogram_data, compression, color_profile, rating, usage_rights, comments
-		    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-			
-		_, err = db.Exec(insertQuery,
-		    meta.FileName, meta.FilePath, meta.FileSize, meta.FileFormat,
-		    meta.DateCreated.Format(time.RFC3339), meta.DateModified.Format(time.RFC3339),
-		    meta.Hash, meta.ThumbnailPath,
-		    meta.Dimensions, meta.Resolution, meta.ColorDepth, 
-		    nilIfNullTime(meta.DateTaken),
-		    meta.CameraMake, meta.CameraModel, meta.LensMake,
-		    meta.LensModel, meta.FocalLength, meta.Aperture, meta.ShutterSpeed, meta.ISO,
-		    meta.ExposureComp, meta.Flash, meta.Latitude, meta.Longitude, meta.Altitude, meta.Title, strings.Join(meta.Tags, ","),
-		    meta.Description, strings.Join(meta.Categories, ","), strings.Join(meta.People, ","),
-		    meta.HistogramData, meta.Compression, meta.ColorProfile, meta.Rating, meta.UsageRights,
-		    strings.Join(meta.Comments, ","))
-
-            if err != nil {
-                log.Println("Error storing metadata in database:", err)
-                return nil
-            }
-        }
-        return nil
-    })
-
-    return err
+	return err
 }
 
 /**** TYPES ****/
-type ImageMetadata struct {
-    FileName      string     `json:"file_name"`
-    FilePath      string     `json:"file_path"`
-    FileSize      int64      `json:"file_size"`
-    FileFormat    string     `json:"file_format"`
-    DateCreated   time.Time  `json:"date_created"`
-    DateModified  time.Time  `json:"date_modified"`
-    Hash          string     `json:"hash"`
-    ThumbnailPath string     `json:"thumbnail_path"`
-    Dimensions    *string    `json:"dimensions"`
-    Resolution    *string    `json:"resolution"`
-    ColorDepth    *string    `json:"color_depth"`
-    DateTaken     sql.NullTime `json:"date_taken"` // Use sql.NullTime for nullable time fields
-    CameraMake    *string    `json:"camera_make"`
-    CameraModel   *string    `json:"camera_model"`
-    LensMake      *string    `json:"lens_make"`
-    LensModel     *string    `json:"lens_model"`
-    FocalLength   *string    `json:"focal_length"`
-    Aperture      *string    `json:"aperture"`
-    ShutterSpeed  *string    `json:"shutter_speed"`
-    ISO           *string    `json:"iso"`
-    ExposureComp  *string    `json:"exposure_comp"`
-    Flash         *string    `json:"flash"`
-    Latitude      *string    `json:"latitude"`
-    Longitude     *string    `json:"longitude"`
-    Altitude      *string    `json:"altitude"`
-    Title         *string    `json:"title"`
-    Tags          []string   `json:"tags"`
-    Description   *string    `json:"description"`
-    Categories    []string   `json:"categories"`
-    People        []string   `json:"people"`
-    HistogramData *string    `json:"histogram_data"`
-    Compression   *string    `json:"compression"`
-    ColorProfile  *string    `json:"color_profile"`
-    Rating        *int       `json:"rating"`
-    UsageRights   *string    `json:"usage_rights"`
-    Comments      []string   `json:"comments"`
+type IndexedFile struct {
+	FileName      string    `json:"file_name"`
+	FilePath      string    `json:"file_path"`
+	FileSize      int64     `json:"file_size"`
+	FileFormat    string    `json:"file_format"`
+	DateCreated   time.Time `json:"date_created"`
+	DateModified  time.Time `json:"date_modified"`
+	Hash          string    `json:"hash"`
+	ThumbnailPath string    `json:"thumbnail_path"`
 }
 
 type Directory struct {
