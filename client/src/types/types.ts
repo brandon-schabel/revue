@@ -4,41 +4,13 @@ export type Directory = {
   }
   
   
-  export type ImageMetadata = {
-    FileName: string;
-    FilePath: string;
-    FileSize: number;
-    FileFormat: string;
-    DateCreated: string;
-    DateModified: string;
-    Hash: string;
-    ThumbnailPath: string;
-    Dimensions?: string;
-    Resolution?: string;
-    ColorDepth?: string;
-    DateTaken?: string;
-    CameraMake?: string;
-    CameraModel?: string;
-    LensMake?: string;
-    LensModel?: string;
-    FocalLength?: string;
-    Aperture?: string;
-    ShutterSpeed?: string;
-    ISO?: string;
-    ExposureComp?: string;
-    Flash?: string;
-    Latitude?: string;
-    Longitude?: string;
-    Altitude?: string;
-    Title?: string;
-    Tags?: string[];
-    Description?: string;
-    Categories?: string[];
-    People?: string[];
-    HistogramData?: string;
-    Compression?: string;
-    ColorProfile?: string;
-    Rating?: number;
-    UsageRights?: string;
-    Comments?: string[];
+  export type FileMetadata = {
+    file_name: string;
+    file_path : string;
+    file_size: number;
+    file_format: string;
+    date_created: string;
+    date_modified: string;
+    hash: string;
+    thumbnail_path: string;
   }

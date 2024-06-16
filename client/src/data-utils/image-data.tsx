@@ -1,15 +1,15 @@
 import { useQuery } from "@tanstack/react-query"
-import { ImageMetadata } from "../types/types"
+import { FileMetadata } from "../types/types"
 
-export const getImages = async () => {
+export const getFiles = async () => {
     const fetcher = fetch("/images")
-    return fetcher.then(response => response.json()) as Promise<ImageMetadata[]>
+    return fetcher.then(response => response.json()) as Promise<FileMetadata[]>
 }
 
 
-export const useImages = () => {
+export const useFiles = () => {
     return useQuery({
         queryKey: ["images"],
-        queryFn: getImages,
+        queryFn: getFiles,
     })
 }

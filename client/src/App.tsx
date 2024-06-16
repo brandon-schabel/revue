@@ -1,22 +1,26 @@
-import './App.css'
 import { useState } from 'react'
 import { useStartIndexImages } from './data-utils/index-images'
-import { useImages } from './data-utils/image-data'
+import { useFiles } from './data-utils/image-data'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-
-
-
 const queryClient = new QueryClient()
-
-
+import './index.css'
+import { Input } from '@ui/input'
+import { Button } from '@ui/button'
+import { Label } from '@ui/label'
+import { DataTable } from './components/file-table'
+import { useTableControl } from './components/table-controller'
+import { fileTableColumns } from './utils/file-table-config'
 
 function App() {
   const [path, setPath] = useState("/Users/brandon/Programming/image-manager/indexing-test")
-  const images = useImages()
+  const images = useFiles()
   const startIndexingMutation = useStartIndexImages()
 
+  const tableController = useTableControl({
+    columns: fileTableColumns,
+    data: images.data || [],
+  })
 
-  console.log({ images })
 
 
   const triggerIndexing = async () => {
@@ -39,12 +43,16 @@ function App() {
         {/* <button onClick={() => setCount((count) => count + 1)}>
           count is {count}
         </button> */}
-        <label htmlFor='path'>Path</label>
-        <input id="path" value="/Users/brandon/Programming/image-manager/indexing-test" onChange={e => setPath(e.target.value)} />
-        <button onClick={() => triggerIndexing()}>Index</button>
+        <Label htmlFor='path'>Path</Label>
+        <Input id="path" value="/Users/brandon/Programming/image-manager/indexing-test" onChange={e => setPath(e.target.value)} />
+        <Button onClick={() => triggerIndexing()}>Index</Button>
         <p>
           Edit <code>src/App.tsx</code> and save to test HMR
         </p>
+      </div>
+
+      <div className='max-h-[50vh] overflow-y-auto'>
+        <DataTable table={tableController} />
       </div>
       <p className="read-the-docs">
         Click on the Vite and React logos to learn more
