@@ -1,51 +1,39 @@
-import reactLogo from './assets/react.svg'
-import viteLogo from '/vite.svg'
 import './App.css'
 import { useState } from 'react'
-
-
-type Directory = {
-  path: string
-}
+import { useStartIndexImages } from './data-utils/index-images'
+import { useImages } from './data-utils/image-data'
+import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
 
 
 
-const handleIndex = (path: string) => {
-  const body = JSON.stringify(
-    {
-      path,
-      reindex: true
-    }
-  )
-  return fetch("/index", {
-    method: "POST",
-    body
-  })
-}
+const queryClient = new QueryClient()
+
+
 
 function App() {
   const [path, setPath] = useState("/Users/brandon/Programming/image-manager/indexing-test")
+  const images = useImages()
+  const startIndexingMutation = useStartIndexImages()
+
+
+  console.log({ images })
 
 
   const triggerIndexing = async () => {
-    const result = await handleIndex(path)
-
-
-    console.log(await result.json())
-
+    await startIndexingMutation.mutate(path)
   }
 
 
   return (
     <>
-      <div>
+      {/* <div>
         <a href="https://vitejs.dev" target="_blank">
           <img src={viteLogo} className="logo" alt="Vite logo" />
         </a>
         <a href="https://react.dev" target="_blank">
           <img src={reactLogo} className="logo react" alt="React logo" />
         </a>
-      </div>
+      </div> */}
       <h1>Vite + React</h1>
       <div className="card">
         {/* <button onClick={() => setCount((count) => count + 1)}>
@@ -65,4 +53,12 @@ function App() {
   )
 }
 
-export default App
+const AppWithProviders = () => {
+  return (
+    <QueryClientProvider client={queryClient}>
+      <App />
+    </QueryClientProvider>
+  )
+}
+
+export default AppWithProviders
