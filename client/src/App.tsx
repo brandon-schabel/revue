@@ -44,7 +44,7 @@ function App() {
           count is {count}
         </button> */}
         <Label htmlFor='path'>Path</Label>
-        <Input id="path" value="/Users/brandon/Programming/image-manager/indexing-test" onChange={e => setPath(e.target.value)} />
+        <Input id="path" value={path} onChange={e => setPath(e.target.value)} />
         <Button onClick={() => triggerIndexing()}>Index</Button>
         <p>
           Edit <code>src/App.tsx</code> and save to test HMR

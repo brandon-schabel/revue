@@ -25,11 +25,11 @@ func main() {
 	fs := http.FileServer(http.Dir("../client/dist"))
 	thumbnailServer := http.FileServer(http.Dir("./thumbnails"))
 
-
 	http.HandleFunc("/index", indexFilesHandler)
 	http.HandleFunc("/images", getImagesHandler)
 	http.Handle("/", fs)
-    http.Handle("/thumbnails/", http.StripPrefix("/thumbnails/", thumbnailServer))
+	http.Handle("/thumbnails/", http.StripPrefix("/thumbnails/", thumbnailServer))
+	http.HandleFunc("/list-directories", listDirectoriesHandler)
 
 	log.Println("Listening on :8080...")
 	err := http.ListenAndServe(":8080", nil)
@@ -39,6 +39,11 @@ func main() {
 }
 
 /******* handlers  *********/
+
+type IndexFileHandlerRequestBody struct {
+	Path    string `json:"path"`
+	Reindex bool   `json:"reindex"`
+}
 
 func indexFilesHandler(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
@@ -56,13 +61,20 @@ func indexFilesHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var dir Directory
-	err = json.Unmarshal(body, &dir)
+	var reindex bool
+
+	var requestBody IndexFileHandlerRequestBody
+	
+	err = json.Unmarshal(body, &requestBody)
+	dir.Path = requestBody.Path
+	reindex = requestBody.Reindex
+
 	if err != nil {
 		http.Error(w, "Error parsing request body", http.StatusBadRequest)
 		return
 	}
 
-	err = indexDirectory(dir.Path, dir.Reindex)
+	err = indexDirectory(dir.Path, reindex)
 	if err != nil {
 		http.Error(w, "Error indexing directory", http.StatusInternalServerError)
 		return
@@ -125,6 +137,59 @@ func getImagesHandler(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(files)
 }
 
+func listDirectoriesHandler(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Invalid request method", http.StatusMethodNotAllowed)
+		return
+	}
+
+	body, err := ioutil.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "Error reading request body", http.StatusInternalServerError)
+		return
+	}
+
+	var dir Directory
+	err = json.Unmarshal(body, &dir)
+	if err != nil {
+		http.Error(w, "Error parsing request body", http.StatusBadRequest)
+		return
+	}
+
+	info, err := os.Stat(dir.Path)
+	if err != nil {
+		http.Error(w, "Error accessing path", http.StatusInternalServerError)
+		return
+	}
+
+	if !info.IsDir() {
+		http.Error(w, "Path is not a directory", http.StatusBadRequest)
+		return
+	}
+
+	var directories []string
+
+	err = filepath.Walk(dir.Path, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return err
+		}
+
+		if info.IsDir() {
+			directories = append(directories, path)
+		}
+
+		return nil
+	})
+
+	if err != nil {
+		http.Error(w, "Error listing directories", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(directories)
+}
+
 /*
 ****
 FUNCTIONS
@@ -149,7 +214,7 @@ func generateThumbnail(filePath string) (string, error) {
 		return "", err
 	}
 
-	thumbnail := resize.Thumbnail(100, 100, img, resize.Lanczos3)
+	thumbnail := resize.Thumbnail(300, 300, img, resize.Lanczos3)
 
 	// Generate a unique ID for the thumbnail
 	b := make([]byte, 16)
@@ -318,6 +383,5 @@ type IndexedFile struct {
 }
 
 type Directory struct {
-	Path    string `json:"path"`
-	Reindex bool   `json:"reindex"`
+	Path string `json:"path"`
 }
