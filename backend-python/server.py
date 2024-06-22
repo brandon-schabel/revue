@@ -8,6 +8,8 @@ from PIL import Image
 from PIL.ExifTags import TAGS
 import secrets
 import logging
+import concurrent.futures
+from functools import partial
 
 app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
 
@@ -38,7 +40,7 @@ def create_table():
         date_created TEXT NOT NULL,
         date_modified TEXT NOT NULL,
         hash TEXT NOT NULL,
-        thumbnail_path TEXT NOT NULL
+        thumbnail_path TEXT
     )
     ''')
     conn.commit()
@@ -64,8 +66,9 @@ def generate_thumbnail(file_path):
 def create_image_hash(file_path):
     hasher = hashlib.sha256()
     with open(file_path, 'rb') as f:
-        hasher.update(file_path.encode())
-        hasher.update(f.read())
+        # Read and update in chunks of 4K
+        for chunk in iter(lambda: f.read(4096), b""):
+            hasher.update(chunk)
     return hasher.hexdigest()
 
 def get_exif_data(image_path):
@@ -79,44 +82,41 @@ def get_exif_data(image_path):
                     exif_data[tag] = str(value)  # Convert all values to strings for JSON serialization
     return exif_data
 
+
 def index_directory(path, reindex=False):
     conn = create_connection()
     cursor = conn.cursor()
 
-
     logger.info(f"Indexing directory: {path}")
     logger.info(f"Reindex flag: {reindex}")
 
-    print({
-        conn, cursor,
-        path, reindex
-    })
+    # Create a set of existing file hashes for faster lookup
+    cursor.execute("SELECT hash FROM files")
+    existing_hashes = set(row[0] for row in cursor.fetchall())
 
-    for root, _, files in os.walk(path):
+    def process_files(files, root):
         for file in files:
             file_path = os.path.join(root, file)
             file_hash = create_image_hash(file_path)
 
-            logger.debug(f"Processing file: {file_path}")
-            logger.debug(f"File hash: {file_hash}")
-
-            cursor.execute("SELECT id FROM files WHERE file_name = ? AND hash = ?", (file, file_hash))
-            existing_file = cursor.fetchone()
-
-            if existing_file:
-                logger.info(f"File with same name and hash already exists; skipping: {file_path}")
+            if file_hash in existing_hashes:
+                logger.info(f"File with same hash already exists; skipping: {file_path}")
                 continue
 
             logger.info(f"Adding new file to database: {file_path}")
 
+            thumbnail_path = None
             try:
-                thumbnail_path = generate_thumbnail(file_path)
+                # Attempt to open the file as an image
+                with Image.open(file_path) as img:
+                    # If successful, generate thumbnail
+                    thumbnail_path = generate_thumbnail(file_path)
             except Exception as e:
-                print(f"Error processing file {file_path}: {e}")
-                continue
+                # If file is not an image or there's an error, log it and continue
+                logger.info(f"Could not generate thumbnail for {file_path}: {e}")
 
             file_stat = os.stat(file_path)
-            meta = {
+            yield {
                 'file_name': file,
                 'file_path': file_path,
                 'file_size': file_stat.st_size,
@@ -127,11 +127,19 @@ def index_directory(path, reindex=False):
                 'thumbnail_path': thumbnail_path,
             }
 
-            cursor.execute('''
-            INSERT INTO files (file_name, file_path, file_size, file_format, date_created, date_modified, hash, thumbnail_path)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (meta['file_name'], meta['file_path'], meta['file_size'], meta['file_format'],
-                  meta['date_created'], meta['date_modified'], meta['hash'], meta['thumbnail_path']))
+    with concurrent.futures.ThreadPoolExecutor() as executor:
+        for root, _, files in os.walk(path):
+            future_to_files = {executor.submit(process_files, files, root): files}
+            for future in concurrent.futures.as_completed(future_to_files):
+                try:
+                    for meta in future.result():
+                        cursor.execute('''
+                        INSERT INTO files (file_name, file_path, file_size, file_format, date_created, date_modified, hash, thumbnail_path)
+                        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                        ''', (meta['file_name'], meta['file_path'], meta['file_size'], meta['file_format'],
+                              meta['date_created'], meta['date_modified'], meta['hash'], meta['thumbnail_path']))
+                except Exception as exc:
+                    logger.error(f'Generated an exception: {exc}')
 
     conn.commit()
     conn.close()
@@ -205,8 +213,8 @@ def clear_files_index():
     except Exception as e:
         return jsonify({"error": f"Failed to clear files index: {str(e)}"}), 500
 
-@app.route('/get-duplicate-images', methods=['GET'])
-def get_duplicate_images():
+@app.route('/get-duplicate-files', methods=['GET'])
+def get_duplicate_files():
     try:
         conn = create_connection()
         cursor = conn.cursor()
@@ -241,6 +249,39 @@ def get_duplicate_images():
         return jsonify(result), 200
     except Exception as e:
         return jsonify({"error": f"Failed to retrieve duplicate images: {str(e)}"}), 500
+
+@app.route('/delete-file', methods=['POST'])
+def delete_file():
+    try:
+        data = request.json
+        file_path = data.get('filePath')
+
+        if not file_path:
+            return jsonify({"error": "No file path provided"}), 400
+
+        # Check if file exists
+        if not os.path.exists(file_path):
+            return jsonify({"error": "File not found"}), 404
+
+        # Delete the file
+        os.remove(file_path)
+
+        # Remove the file entry from the database
+        conn = create_connection()
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM files WHERE file_path = ?', (file_path,))
+        conn.commit()
+        conn.close()
+
+        # If there's an associated thumbnail, delete it too
+        thumbnail_path = os.path.join(THUMBNAIL_DIR, os.path.basename(file_path))
+        if os.path.exists(thumbnail_path):
+            os.remove(thumbnail_path)
+
+        return jsonify({"message": "File deleted successfully"}), 200
+    except Exception as e:
+        logger.error(f"Error deleting file: {str(e)}")
+        return jsonify({"error": f"Failed to delete file: {str(e)}"}), 500
 
 @app.route('/thumbnails/<path:filename>')
 def serve_thumbnail(filename):

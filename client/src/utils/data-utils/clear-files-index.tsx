@@ -1,5 +1,5 @@
 import { useMutation, } from "@tanstack/react-query";
-import { useInvalidateDuplicateImages } from "./duplicate-images";
+import { useInvalidateDuplicateFiles } from "./find-duplicate-files";
 import { useInvalidateFiles } from "./image-data";
 
 const clearFilesIndex = async (): Promise<{ message: string }> => {
@@ -16,7 +16,7 @@ const clearFilesIndex = async (): Promise<{ message: string }> => {
 };
 
 export const useClearFilesIndex = () => {
-    const invalidateDuplicates = useInvalidateDuplicateImages();
+    const invalidateDuplicates = useInvalidateDuplicateFiles();
     const invalidateFiles = useInvalidateFiles();
 
     return useMutation({

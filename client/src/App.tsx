@@ -2,7 +2,6 @@ import { useState } from 'react'
 import { useStartIndexImages } from './utils/data-utils/index-images'
 import { useFiles } from './utils/data-utils/image-data'
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query'
-const queryClient = new QueryClient()
 import './index.css'
 import { Input } from '@ui/input'
 import { Button } from '@ui/button'
@@ -10,60 +9,68 @@ import { Label } from '@ui/label'
 import { DataTable } from './components/file-table'
 import { useTableControl } from './components/table-controller'
 import { fileTableColumns } from './utils/file-table-config'
-import { useFindDuplicateImages } from './utils/data-utils/duplicate-images'
+import { useFindDuplicateFiles } from './utils/data-utils/find-duplicate-files'
 import { useClearFilesIndex } from './utils/data-utils/clear-files-index'
 import { LoaderCircle } from 'lucide-react'
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@ui/tabs"
+import { DuplicateFilesList } from './components/duplicate-files-list'
+
+const queryClient = new QueryClient()
 
 function App() {
   const [path, setPath] = useState("/Users/brandon/Programming/image-manager/indexing-test")
   const files = useFiles()
   const startIndexingMutation = useStartIndexImages()
-  const findDuplicateImages = useFindDuplicateImages()
+  const findDuplicateImages = useFindDuplicateFiles()
   const clearIndex = useClearFilesIndex()
-
-
-  console.log({
-    duplicates: findDuplicateImages.data
-  })
 
   const tableController = useTableControl({
     columns: fileTableColumns,
     data: files.data || [],
   })
 
-
+  const handleDuplicateDelete = () => {
+    findDuplicateImages.refetch();
+  };
 
   return (
-    <>
-      <div className="card">
-
+    <div className="container mx-auto p-4">
+      <div className="card mb-4">
         <Label htmlFor='path'>Path</Label>
         <Input id="path" value={path} onChange={e => setPath(e.target.value)} />
-        <Button onClick={() => startIndexingMutation.mutate(path)}>
+        <Button onClick={() => startIndexingMutation.mutate(path)} className="mr-2">
           {startIndexingMutation.status === 'pending' ? <LoaderCircle className="animate-spin" /> : "Index"}
-          Index</Button>
+        </Button>
         <Button onClick={() => clearIndex.mutate()}>Clear Index</Button>
-
-
-        <div>
-          {findDuplicateImages.data &&
-            <pre>
-              {
-                JSON.stringify(findDuplicateImages.data, null, 2)
-              }
-            </pre>}
-        </div>
       </div>
 
-
-      <div>
-        Files: {files.data?.length}
-      </div>
-      <div className='overflow-y-auto'>
-        <DataTable table={tableController} />
-      </div>
-
-    </>
+      <Tabs defaultValue="indexed">
+        <TabsList>
+          <TabsTrigger value="indexed">Indexed Files</TabsTrigger>
+          <TabsTrigger value="duplicates">Duplicate Files</TabsTrigger>
+        </TabsList>
+        <TabsContent value="indexed">
+          <div>
+            Files: {files.data?.length}
+          </div>
+          <div className='overflow-y-auto'>
+            <DataTable table={tableController} />
+          </div>
+        </TabsContent>
+        <TabsContent value="duplicates">
+          <div>
+            {findDuplicateImages.data ? (
+              <DuplicateFilesList
+                duplicates={findDuplicateImages.data}
+                onDelete={handleDuplicateDelete}
+              />
+            ) : (
+              <p>No duplicate files found.</p>
+            )}
+          </div>
+        </TabsContent>
+      </Tabs>
+    </div>
   )
 }
 
