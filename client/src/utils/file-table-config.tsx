@@ -1,5 +1,5 @@
-import { FileMetadata } from '../types/types'
-import { ColumnDef } from '@tanstack/react-table'
+import type { FileMetadata } from '../types/types'
+import type { ColumnDef } from '@tanstack/react-table'
 
 
 
