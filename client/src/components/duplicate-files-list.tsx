@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { Button } from '@ui/button';
 import { useDeleteFile } from '../utils/data-utils/delete-file';
 import type { DuplicateFileGroup } from '../utils/data-utils/find-duplicate-files';
-import type { FileMetadata } from '../types/types';
+import type { IndexedFileMetadata } from '../types/types';
 import { LoaderCircle } from 'lucide-react';
 
 interface DuplicateFilesListProps {
@@ -42,7 +42,7 @@ export const DuplicateFilesList: React.FC<DuplicateFilesListProps> = ({ duplicat
 
     return (
         <div>
-            {duplicates.map((group, groupIndex) => {
+            {duplicates?.map((group, groupIndex) => {
                 const newestFile = group.reduce((newest, current) =>
                     new Date(current.date_created) > new Date(newest.date_created) ? current : newest
                 );
@@ -53,7 +53,7 @@ export const DuplicateFilesList: React.FC<DuplicateFilesListProps> = ({ duplicat
                     <div key={groupIndex} className="mb-4 p-4 border rounded">
                         <h3 className="font-bold mb-2">Hash: {group[0].hash}</h3>
                         <ul>
-                            {group.map((file: FileMetadata, fileIndex: number) => {
+                            {group.map((file: IndexedFileMetadata, fileIndex: number) => {
                                 const isNewest = file.file_path === newestFile.file_path;
                                 const isDeleting = isGroupDeleting && deletingFile === file.file_path;
                                 return (

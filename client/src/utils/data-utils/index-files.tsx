@@ -1,14 +1,13 @@
 import { useMutation } from "@tanstack/react-query"
 import { useInvalidateFiles } from "./image-data"
 
-const startIndexImages = async (path: string) => {
+const startIndexFiles = async (path: string) => {
   const body = JSON.stringify(
     {
       path,
-      reindex: true
     }
   )
-  const result = await fetch("/index", {
+  const result = await fetch("/api/v1/index-files", {
     method: "POST",
     body,
     headers: {
@@ -20,10 +19,10 @@ const startIndexImages = async (path: string) => {
 }
 
 
-export const useStartIndexImages = () => {
+export const useStartIndexFiles = () => {
   const invalidateFiles = useInvalidateFiles()
   return useMutation({
-    mutationFn: startIndexImages,
+    mutationFn: startIndexFiles,
     onSuccess: () => {
       invalidateFiles()
     }

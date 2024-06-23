@@ -1,3 +1,6 @@
 */imagedb.db
 */thumbnails
 indexing-test
+backend-python/static
+node_modules
+dist

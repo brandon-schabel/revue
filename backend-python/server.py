@@ -10,8 +10,12 @@ import secrets
 import logging
 import concurrent.futures
 from functools import partial
+import psutil
+from flask_cors import CORS
 
-app = Flask(__name__, static_folder='../client/dist', static_url_path='/')
+app = Flask(__name__, static_folder='static', static_url_path='/')
+# configure proper cors 
+CORS(app) 
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -83,12 +87,11 @@ def get_exif_data(image_path):
     return exif_data
 
 
-def index_directory(path, reindex=False):
+def index_directory(path):
     conn = create_connection()
     cursor = conn.cursor()
 
     logger.info(f"Indexing directory: {path}")
-    logger.info(f"Reindex flag: {reindex}")
 
     # Create a set of existing file hashes for faster lookup
     cursor.execute("SELECT hash FROM files")
@@ -144,32 +147,27 @@ def index_directory(path, reindex=False):
     conn.commit()
     conn.close()
 
+
 @app.route('/')
 def serve_react_app():
     create_table()
     return app.send_static_file('index.html')
 
-@app.route('/index', methods=['POST'])
+@app.route('/api/v1/index-files', methods=['POST'])
 def index_files_handler():
     data = request.json
     path = data.get('path')
-    reindex = data.get('reindex', False)
-
-    print({
-        path, 
-        reindex
-    })
 
     if not path:
         return jsonify({"error": "No path provided"}), 400
 
     try:
-        index_directory(path, reindex)
+        index_directory(path)
         return jsonify({"message": "Indexing complete"}), 200
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/images', methods=['GET'])
+@app.route('/api/v1/images', methods=['GET'])
 def get_images_handler():
     conn = create_connection()
     cursor = conn.cursor()
@@ -187,21 +185,67 @@ def get_images_handler():
     print(f"Number of files processed: {len(files)}")  # Debug print
     return jsonify(files)
 
-@app.route('/list-directories', methods=['POST'])
-def list_directories_handler():
+@app.route('/api/v1/list-directory', methods=['POST'])
+def list_directory_handler():
     data = request.json
-    path = data.get('path')
+    path = data.get('path', '/')  # Default to root if no path is provided
 
-    if not path or not os.path.isdir(path):
+    # Clean up the path
+    path = os.path.normpath(path)
+
+    logger.info(f"Listing directory contents for path: {path}")
+
+    if not os.path.isdir(path):
         return jsonify({"error": "Invalid directory path"}), 400
 
-    directories = []
-    for root, dirs, _ in os.walk(path):
-        directories.extend([os.path.join(root, d) for d in dirs])
+    try:
+        directories = []
+        files = []
+        with os.scandir(path) as entries:
+            for entry in entries:
+                if entry.is_dir():
+                    directories.append({
+                        "name": entry.name,
+                        "path": entry.path
+                    })
+                else:
+                    stat = entry.stat()
+                    files.append({
+                        "name": entry.name,
+                        "path": entry.path,
+                        "size": stat.st_size,
+                        "lastModified": time.strftime('%Y-%m-%dT%H:%M:%SZ', time.gmtime(stat.st_mtime)),
+                        "isDirectory": False
+                    })
+        
+        return jsonify({
+            "currentPath": path,
+            "parentPath": os.path.dirname(path) if path != '/' else None,
+            "directories": sorted(directories, key=lambda x: x['name'].lower()),
+            "files": sorted(files, key=lambda x: x['name'].lower())
+        }), 200
+    except PermissionError:
+        return jsonify({"error": "Permission denied"}), 403
+    except Exception as e:
+        return jsonify({"error": f"Failed to list directory contents: {str(e)}"}), 500
 
-    return jsonify(directories)
+@app.route('/api/v1/list-drives', methods=['GET'])
+def list_drives():
+    try:
+        drives = []
+        partitions = psutil.disk_partitions(all=False)
+        for partition in partitions:
+            if partition.mountpoint != '/':
+                drives.append({
+                    "path": partition.mountpoint,
+                    "device": partition.device,
+                    "fstype": partition.fstype
+                })
+        return jsonify(drives), 200
+    except Exception as e:
+        return jsonify({"error": f"Failed to list drives: {str(e)}"}), 500
 
-@app.route('/clear-files-index', methods=['POST'])
+@app.route('/api/v1/clear-files-index', methods=['POST'])
 def clear_files_index():
     try:
         conn = create_connection()
@@ -213,7 +257,7 @@ def clear_files_index():
     except Exception as e:
         return jsonify({"error": f"Failed to clear files index: {str(e)}"}), 500
 
-@app.route('/get-duplicate-files', methods=['GET'])
+@app.route('/api/v1/get-duplicate-files', methods=['GET'])
 def get_duplicate_files():
     try:
         conn = create_connection()
@@ -250,7 +294,7 @@ def get_duplicate_files():
     except Exception as e:
         return jsonify({"error": f"Failed to retrieve duplicate images: {str(e)}"}), 500
 
-@app.route('/delete-file', methods=['POST'])
+@app.route('/api/v1/delete-file', methods=['POST'])
 def delete_file():
     try:
         data = request.json

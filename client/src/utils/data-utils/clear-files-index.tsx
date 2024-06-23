@@ -3,7 +3,7 @@ import { useInvalidateDuplicateFiles } from "./find-duplicate-files";
 import { useInvalidateFiles } from "./image-data";
 
 const clearFilesIndex = async (): Promise<{ message: string }> => {
-    const response = await fetch("/clear-files-index", {
+    const response = await fetch("/api/v1/clear-files-index", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

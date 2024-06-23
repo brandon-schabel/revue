@@ -1,9 +1,9 @@
-import type { FileMetadata } from '../types/types'
+import type { IndexedFileMetadata } from '../types/types'
 import type { ColumnDef } from '@tanstack/react-table'
 
 
 
-export const fileTableColumns: ColumnDef<FileMetadata>[] = [
+export const fileTableColumns: ColumnDef<IndexedFileMetadata>[] = [
     {
         header: 'File Name',
         accessorKey: 'file_name',

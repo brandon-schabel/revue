@@ -1,14 +1,14 @@
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@ui/table";
 import { flexRender } from "@tanstack/react-table";
 import { ChevronDown, ChevronUp } from "lucide-react";
-import { UseTableControl } from "./table-controller";
+import type { UseTableControl } from "./table-controller";
 
-export type DataDisplayTableProps = {
+export type ControlledTableProps = {
     // biome-ignore lint/suspicious/noExplicitAny: expected any
     table: UseTableControl<any>;
 };
 
-export const DataTable = ({ table }: DataDisplayTableProps) => {
+export const ControlledTable = ({ table }: ControlledTableProps) => {
     return (
         <Table>
             <TableHeader>

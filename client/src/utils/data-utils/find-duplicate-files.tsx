@@ -1,11 +1,11 @@
 import { useQuery } from "@tanstack/react-query";
-import type { FileMetadata } from "../../types/types";
+import type { IndexedFileMetadata } from "../../types/types";
 import { useInvalidator } from "./use-invalidator";
 
-export type DuplicateFileGroup = FileMetadata[];
+export type DuplicateFileGroup = IndexedFileMetadata[];
 
 export const getDuplicateFiles = async (): Promise<DuplicateFileGroup[]> => {
-    const response = await fetch("/get-duplicate-files", {
+    const response = await fetch("/api/v1/get-duplicate-files", {
         headers: {
             "Content-Type": "application/json",
         }
