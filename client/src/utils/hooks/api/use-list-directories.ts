@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { DirectoryContents } from "../../types/types";
+import type { DirectoryContents } from "../../../types/types";
 import { useInvalidator } from "./use-invalidator";
 
 export const getDirectoryContents = async (path: string) => {

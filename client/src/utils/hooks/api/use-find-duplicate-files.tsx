@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { IndexedFileMetadata } from "../../types/types";
+import type { IndexedFileMetadata } from "../../../types/types";
 import { useInvalidator } from "./use-invalidator";
 
 export type DuplicateFileGroup = IndexedFileMetadata[];

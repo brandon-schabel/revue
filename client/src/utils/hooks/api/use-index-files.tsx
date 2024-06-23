@@ -1,5 +1,5 @@
 import { useMutation } from "@tanstack/react-query"
-import { useInvalidateFiles } from "./image-data"
+import { useInvalidateFiles } from "./use-files"
 
 const startIndexFiles = async (path: string) => {
   const body = JSON.stringify(

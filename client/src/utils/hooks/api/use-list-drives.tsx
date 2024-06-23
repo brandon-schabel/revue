@@ -1,5 +1,5 @@
 import { useQuery } from "@tanstack/react-query";
-import type { Drive } from "../../types/types";
+import type { Drive } from "../../../types/types";
 import { useInvalidator } from "./use-invalidator";
 
 export const getDrives = async (): Promise<Drive[]> => {

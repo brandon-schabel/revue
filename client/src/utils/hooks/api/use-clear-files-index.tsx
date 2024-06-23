@@ -1,6 +1,6 @@
 import { useMutation, } from "@tanstack/react-query";
-import { useInvalidateDuplicateFiles } from "./find-duplicate-files";
-import { useInvalidateFiles } from "./image-data";
+import { useInvalidateDuplicateFiles } from "./use-find-duplicate-files";
+import { useInvalidateFiles } from "./use-files";
 
 const clearFilesIndex = async (): Promise<{ message: string }> => {
     const response = await fetch("/api/v1/clear-files-index", {

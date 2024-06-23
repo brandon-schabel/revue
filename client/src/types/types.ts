@@ -3,17 +3,6 @@ export type Directory = {
 	path: string;
 };
 
-export type IndexedFileMetadata = {
-	file_name: string;
-	file_path: string;
-	file_size: number;
-	file_format: string;
-	date_created: string;
-	date_modified: string;
-	hash: string;
-	thumbnail_path: string;
-};
-
 export type Drive = {
 	path: string;
 	device: string;
@@ -35,3 +24,28 @@ export type DirectoryContents = {
 	files: FileInfo[];
 };
 
+export type ImageAnalysis = {
+  description: string;
+  subjects: string[];
+  colors: string[];
+  mood: string[];
+  composition: string;
+  text: string[];
+  tags: string[];
+  categories: string[];
+  quality: string;
+  uniqueFeatures: string[];
+};
+
+export type IndexedFileMetadata = {
+	id: number;
+	file_name: string;
+	file_path: string;
+	file_size: number;
+	file_format: string;
+	date_created: string;
+	date_modified: string;
+	hash: string;
+	thumbnail_path: string;
+	analysis: ImageAnalysis | null;
+};

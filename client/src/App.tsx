@@ -1,20 +1,21 @@
-import { useFiles } from "./utils/data-utils/image-data";
+import { useFiles } from "./utils/hooks/api/use-files";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import "./index.css";
 import { Button } from "@ui/button";
-import { ControlledTable } from "./components/data-table";
-import { useTableControl } from "./components/table-controller";
+import { ControlledTable } from "./components/controlled-table";
+import { useTableControl } from "./utils/hooks/use-table-control";
 import { fileTableColumns } from "./utils/file-table-config";
-import { useFindDuplicateFiles } from "./utils/data-utils/find-duplicate-files";
+import { useFindDuplicateFiles } from "./utils/hooks/api/use-find-duplicate-files";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@ui/tabs";
 import { DuplicateFilesList } from "./components/duplicate-files-list";
 import { useDirectoryNavigation } from "./utils/hooks/use-directory-navigation";
 import React from "react";
-import { useDirectoryContents } from "./utils/data-utils/list-directories";
+import { useDirectoryContents } from "./utils/hooks/api/use-list-directories";
 import type { Directory, FileInfo } from "./types/types";
-import { useClearFilesIndex } from "./utils/data-utils/clear-files-index";
-import { useStartIndexFiles } from "./utils/data-utils/index-files";
-import { useListDrives } from "./utils/data-utils/use-list-drives";
+import { useClearFilesIndex } from "./utils/hooks/api/use-clear-files-index";
+import { useStartIndexFiles } from "./utils/hooks/api/use-index-files";
+import { useListDrives } from "./utils/hooks/api/use-list-drives";
+import { ImageGrid } from "./components/image-grid";
 
 const queryClient = new QueryClient();
 
@@ -72,6 +73,7 @@ function App() {
           <TabsTrigger value="navigation">Navigation</TabsTrigger>
           <TabsTrigger value="indexed">Indexed Files</TabsTrigger>
           <TabsTrigger value="duplicates">Duplicate Files</TabsTrigger>
+          <TabsTrigger value="image-grid">Image Grid</TabsTrigger>
         </TabsList>
         <TabsContent value="navigation">
           <div className="card mb-4">
@@ -134,7 +136,7 @@ function App() {
                 <React.Fragment key={part}>
                   <Button
                     onClick={() =>
-                      navigateToPath(`/${pathParts.slice(0, index + 1).join("/")}`)
+                      navigateToPath(`/${pathParts.slice(0, index + 1)?.join("/")}`)
                     }
                     variant="link"
                     className="p-1"
@@ -191,6 +193,9 @@ function App() {
               <p>No duplicate files found.</p>
             )}
           </div>
+        </TabsContent>
+        <TabsContent value="image-grid">
+          <ImageGrid />
         </TabsContent>
       </Tabs>
     </div>

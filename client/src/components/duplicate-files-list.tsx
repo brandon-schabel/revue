@@ -1,8 +1,8 @@
 import type React from 'react';
 import { useState } from 'react';
 import { Button } from '@ui/button';
-import { useDeleteFile } from '../utils/data-utils/delete-file';
-import type { DuplicateFileGroup } from '../utils/data-utils/find-duplicate-files';
+import { useDeleteFile } from '../utils/hooks/api/use-delete-file';
+import type { DuplicateFileGroup } from '../utils/hooks/api/use-find-duplicate-files';
 import type { IndexedFileMetadata } from '../types/types';
 import { LoaderCircle } from 'lucide-react';
 

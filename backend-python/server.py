@@ -12,6 +12,12 @@ import concurrent.futures
 from functools import partial
 import psutil
 from flask_cors import CORS
+from dotenv import load_dotenv
+import requests  
+import base64
+from anthropic import Anthropic
+import io
+
 
 app = Flask(__name__, static_folder='static', static_url_path='/')
 # configure proper cors 
@@ -19,6 +25,15 @@ CORS(app)
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
+load_dotenv()
+
+ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY")
+if not ANTHROPIC_API_KEY:
+    raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
+
+anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
+
+
 
 
 # Constants
@@ -34,6 +49,8 @@ def create_connection():
 def create_table():
     conn = create_connection()
     cursor = conn.cursor()
+    
+    # Create files table (unchanged)
     cursor.execute('''
     CREATE TABLE IF NOT EXISTS files (
         id INTEGER PRIMARY KEY,
@@ -47,6 +64,37 @@ def create_table():
         thumbnail_path TEXT
     )
     ''')
+
+    # Check if image_analysis table exists
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table' AND name='image_analysis'")
+    table_exists = cursor.fetchone()
+
+    if table_exists:
+        # Alter existing table
+        try:
+            cursor.execute('ALTER TABLE image_analysis RENAME COLUMN category TO categories')
+        except sqlite3.OperationalError:
+            # Column might already be renamed, ignore the error
+            pass
+    else:
+        # Create new table with updated schema
+        cursor.execute('''
+        CREATE TABLE image_analysis (
+            hash TEXT PRIMARY KEY,
+            description TEXT,
+            subjects TEXT,
+            colors TEXT,
+            mood TEXT,
+            composition TEXT,
+            visible_text TEXT,
+            tags TEXT,
+            categories TEXT,
+            quality TEXT,
+            unique_features TEXT
+        )
+        ''')
+
+
     conn.commit()
     conn.close()
 
@@ -150,8 +198,162 @@ def index_directory(path):
 
 @app.route('/')
 def serve_react_app():
-    create_table()
     return app.send_static_file('index.html')
+
+
+@app.route('/api/v1/analyze-image/<int:image_id>', methods=['POST'])
+def analyze_image(image_id):
+    conn = None
+    try:
+        conn = create_connection()
+        cursor = conn.cursor()
+        
+        # Get the image hash and path
+        cursor.execute('SELECT hash, file_path FROM files WHERE id = ?', (image_id,))
+        result = cursor.fetchone()
+        
+        if not result:
+            return jsonify({"error": "Image not found", "details": f"No image found with id {image_id}"}), 404
+        
+        image_hash, file_path = result
+        
+        # Check if analysis already exists
+        cursor.execute('''
+        SELECT description, subjects, colors, mood, composition, visible_text, tags, categories, quality, unique_features
+        FROM image_analysis 
+        WHERE hash = ?
+        ''', (image_hash,))
+        existing_analysis = cursor.fetchone()
+        
+        if existing_analysis:
+            analysis = {
+                'description': existing_analysis['description'],
+                'subjects': json.loads(existing_analysis['subjects']) if existing_analysis['subjects'] else None,
+                'colors': json.loads(existing_analysis['colors']) if existing_analysis['colors'] else None,
+                'mood': json.loads(existing_analysis['mood']) if existing_analysis['mood'] else None,
+                'composition': existing_analysis['composition'],
+                'visible_text': existing_analysis['visible_text'],
+                'tags': json.loads(existing_analysis['tags']) if existing_analysis['tags'] else None,
+                'categories': json.loads(existing_analysis['categories']) if existing_analysis['categories'] else None,
+                'quality': existing_analysis['quality'],
+                'unique_features': json.loads(existing_analysis['unique_features']) if existing_analysis['unique_features'] else None
+            }
+            return jsonify({"analysis": analysis}), 200
+        
+        # Image processing code
+        with Image.open(file_path) as img:
+            # Convert image to RGB if it's not
+            if img.mode != 'RGB':
+                img = img.convert('RGB')
+            
+            # Resize image if it's too large
+            max_size = 1024
+            if max(img.size) > max_size:
+                img.thumbnail((max_size, max_size))
+            
+            # Convert image to base64
+            buffered = io.BytesIO()
+            img.save(buffered, format="JPEG")
+            base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        
+        try:
+            response = anthropic_client.messages.create(
+                model="claude-3-5-sonnet-20240620",
+                max_tokens=1024,
+                messages=[
+                    {
+                        "role": "user",
+                        "content": [
+                            {
+                                "type": "image",
+                                "source": {
+                                    "type": "base64",
+                                    "media_type": "image/jpeg",
+                                    "data": base64_image
+                                }
+                            },
+                            {
+                                "type": "text",
+                                "text": """
+                                Respond only in JSON format. Do not include any explanations or text outside of the JSON structure.
+                                Analyze this image and provide a detailed description in the following JSON format:
+                                {
+                                    "description": "A brief overall description of the image",
+                                    "subjects": ["List of main subjects or objects in the image"],
+                                    "colors": ["Dominant colors in the image"],
+                                    "mood": ["List of moods or atmospheres present in the image"],
+                                    "composition": "Brief description of the image composition",
+                                    "text": ["Any visible text in the image, each line of text"],
+                                    "tags": ["Relevant tags for the image"],
+                                    "categories": ["Best fitting categories (e.g., landscape, portrait, still life, action, abstract)"],
+                                    "quality": "Image quality assessment (e.g., high, medium, low)",
+                                    "uniqueFeatures": ["Any unique or standout features of the image"]
+                                }
+                                """
+                            }
+                        ]
+                    }
+                ]
+            )
+
+            # Extract the content from the response
+            analysis_text = response.content[0].text
+            structured_analysis = json.loads(analysis_text)
+                        # Validate the structure of the analysis
+            required_fields = ['description', 'subjects', 'colors', 'mood', 'composition', 'text', 'tags', 'categories', 'quality', 'uniqueFeatures']
+            if not all(field in structured_analysis for field in required_fields):
+                raise ValueError("Generated analysis is missing required fields")
+
+            # Ensure array fields are actually arrays
+            array_fields = ['subjects', 'colors', 'mood', 'tags', 'categories', 'uniqueFeatures', 'text']
+            for field in array_fields:
+                if not isinstance(structured_analysis[field], list):
+                    structured_analysis[field] = [structured_analysis[field]]
+
+        except json.JSONDecodeError:
+            logger.error("Failed to parse Anthropic API response as JSON")
+            return jsonify({"error": "Failed to parse image analysis result"}), 500
+        except ValueError as ve:
+            logger.error(f"Invalid analysis structure: {str(ve)}")
+            return jsonify({"error": "Invalid analysis structure", "details": str(ve)}), 500
+        except Exception as e:
+            logger.error(f"Anthropic API request failed: {str(e)}")
+            return jsonify({"error": "Failed to analyze image", "details": str(e)}), 500
+
+    # Store the analysis result
+        cursor.execute('''
+            INSERT INTO image_analysis 
+            (hash, description, subjects, colors, mood, composition, visible_text, tags, categories, quality, unique_features)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                image_hash,
+                structured_analysis['description'],
+                json.dumps(structured_analysis['subjects']),
+                json.dumps(structured_analysis['colors']),
+                json.dumps(structured_analysis['mood']),
+                structured_analysis['composition'],
+                json.dumps(structured_analysis['text']),
+                json.dumps(structured_analysis['tags']),
+                json.dumps(structured_analysis['categories']),
+                structured_analysis['quality'],
+                json.dumps(structured_analysis['uniqueFeatures'])
+          ))
+        conn.commit()
+    
+        return jsonify({"analysis": structured_analysis}), 200
+
+    except Exception as e:
+        error_details = traceback.format_exc()
+        logger.error(f"Error analyzing image: {str(e)}\n{error_details}")
+        return jsonify({
+            "error": "Failed to analyze image",
+            "message": str(e),
+            "details": error_details
+        }), 500
+    finally:
+        if conn:
+            conn.close()
+
 
 @app.route('/api/v1/index-files', methods=['POST'])
 def index_files_handler():
@@ -167,23 +369,48 @@ def index_files_handler():
     except Exception as e:
         return jsonify({"error": str(e)}), 500
 
-@app.route('/api/v1/images', methods=['GET'])
-def get_images_handler():
+@app.route('/api/v1/files', methods=['GET'])
+def get_files_handler():
     conn = create_connection()
     cursor = conn.cursor()
     cursor.execute('''
-    SELECT id, file_name, file_path, file_size, file_format, date_created, date_modified, hash, thumbnail_path
-    FROM files
+    SELECT f.id, f.file_name, f.file_path, f.file_size, f.file_format, f.date_created, f.date_modified, f.hash, f.thumbnail_path,
+           ia.description, ia.subjects, ia.colors, ia.mood, ia.composition, ia.visible_text, ia.tags, ia.categories, ia.quality, ia.unique_features
+    FROM files f
+    LEFT JOIN image_analysis ia ON f.hash = ia.hash
     ''')
     
     rows = cursor.fetchall()
     print(f"Number of rows fetched: {len(rows)}")  # Debug print
     
-    files = [dict(row) for row in rows]
+    def parse_json_field(field):
+        if field:
+            try:
+                return json.loads(field)
+            except json.JSONDecodeError:
+                return None
+        return None
+
+    files = [{
+        **dict(row),
+        'analysis': {
+            'description': row['description'],
+            'subjects': parse_json_field(row['subjects']),
+            'colors': parse_json_field(row['colors']),
+            'mood': parse_json_field(row['mood']),
+            'composition': row['composition'],
+            'visible_text': parse_json_field(row['visible_text']),
+            'tags': parse_json_field(row['tags']),
+            'categories': parse_json_field(row['categories']),
+            'quality': row['quality'],
+            'unique_features': parse_json_field(row['unique_features'])
+        } if row['description'] is not None else None
+    } for row in rows]
     conn.close()
     
     print(f"Number of files processed: {len(files)}")  # Debug print
     return jsonify(files)
+
 
 @app.route('/api/v1/list-directory', methods=['POST'])
 def list_directory_handler():
@@ -332,4 +559,5 @@ def serve_thumbnail(filename):
     return send_from_directory(THUMBNAIL_DIR, filename)
 
 if __name__ == '__main__':
+    create_table()
     app.run(port=8080, debug=True)

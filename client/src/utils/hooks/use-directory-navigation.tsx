@@ -1,6 +1,6 @@
 import { useCallback } from 'react';
 import { useLocalStorage } from './use-local-storage';
-import { useDirectoryContents, useInvalidateDirectoryContents } from '../data-utils/list-directories';
+import { useDirectoryContents, useInvalidateDirectoryContents } from './api/use-list-directories';
 import type { Directory } from '../../types/types';
 
 interface UseDirectoryNavigationResult {
@@ -36,7 +36,7 @@ const pathUtils = {
   },
 
   join: (...paths: string[]): string => {
-    return pathUtils.normalize(paths.join('/'));
+    return pathUtils.normalize(paths?.join('/'));
   }
 };
 
@@ -60,7 +60,7 @@ export function useDirectoryNavigation({ username }: { username: string }): UseD
       fullPath = pathUtils.normalize(newPath);
     } else {
       // If it's a relative path, join it with the current path
-      fullPath = pathUtils.normalize(pathUtils.join(currentPath, newPath));
+      fullPath = pathUtils.normalize(pathUtils?.join(currentPath, newPath));
     }
 
     setCurrentPath(fullPath);
