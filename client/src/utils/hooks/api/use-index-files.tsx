@@ -1,5 +1,6 @@
 import { useMutation } from "@tanstack/react-query"
 import { useInvalidateFiles } from "./use-files"
+import { fetchServer } from "../fetch-server"
 
 const startIndexFiles = async (path: string) => {
   const body = JSON.stringify(
@@ -7,7 +8,7 @@ const startIndexFiles = async (path: string) => {
       path,
     }
   )
-  const result = await fetch("/api/v1/index-files", {
+  const result = await fetchServer("/index-files", {
     method: "POST",
     body,
     headers: {

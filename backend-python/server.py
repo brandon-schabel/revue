@@ -17,11 +17,14 @@ import requests
 import base64
 from anthropic import Anthropic
 import io
+import re
 
 
 app = Flask(__name__, static_folder='static', static_url_path='/')
 # configure proper cors 
-CORS(app) 
+# all localhost:3000 request in development 
+# if os.environ.get('FLASK_ENV') == 'development':
+CORS(app, resources={r"/api/*": {"origins": "http://localhost:3000"}})
 
 logging.basicConfig(level=logging.DEBUG)
 logger = logging.getLogger(__name__)
@@ -32,8 +35,6 @@ if not ANTHROPIC_API_KEY:
     raise ValueError("ANTHROPIC_API_KEY environment variable is not set")
 
 anthropic_client = Anthropic(api_key=ANTHROPIC_API_KEY)
-
-
 
 
 # Constants
@@ -195,70 +196,162 @@ def index_directory(path):
     conn.commit()
     conn.close()
 
+def prepare_image_for_analysis(file_path):
+    with Image.open(file_path) as img:
+        # Convert image to RGB if it's not
+        if img.mode != 'RGB':
+            img = img.convert('RGB')
+        
+        # Resize image if it's too large
+        max_size = 1024
+        if max(img.size) > max_size:
+            img.thumbnail((max_size, max_size))
+        
+        # Convert image to base64
+        buffered = io.BytesIO()
+        img.save(buffered, format="JPEG")
+        base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+    
+    return base64_image
+
+def get_image_analysis(image_id):
+    conn = create_connection()
+    cursor = conn.cursor()
+    
+    # Get the image hash and path
+    cursor.execute('SELECT hash, file_path FROM files WHERE id = ?', (image_id,))
+    result = cursor.fetchone()
+    
+    if not result:
+        raise ValueError(f"No image found with id {image_id}")
+    
+    image_hash, file_path = result
+    
+    # Check if analysis already exists
+    cursor.execute('''
+    SELECT description, subjects, colors, mood, composition, visible_text, tags, categories, quality, unique_features
+    FROM image_analysis 
+    WHERE hash = ?
+    ''', (image_hash,))
+    existing_analysis = cursor.fetchone()
+    
+    conn.close()
+    
+    if existing_analysis:
+        return {
+            'description': existing_analysis['description'],
+            'subjects': json.loads(existing_analysis['subjects']) if existing_analysis['subjects'] else None,
+            'colors': json.loads(existing_analysis['colors']) if existing_analysis['colors'] else None,
+            'mood': json.loads(existing_analysis['mood']) if existing_analysis['mood'] else None,
+            'composition': existing_analysis['composition'],
+            'visible_text': json.loads(existing_analysis['visible_text']) if existing_analysis['visible_text'] else [],
+            'tags': json.loads(existing_analysis['tags']) if existing_analysis['tags'] else None,
+            'categories': json.loads(existing_analysis['categories']) if existing_analysis['categories'] else None,
+            'quality': existing_analysis['quality'],
+            'unique_features': json.loads(existing_analysis['unique_features']) if existing_analysis['unique_features'] else None
+        }
+    
+    return None, image_hash, file_path
+
+def store_image_analysis(image_hash, analysis):
+    conn = None
+    try:
+        conn = create_connection()
+        cursor = conn.cursor()
+        
+        # Log the incoming data
+        logging.info(f"Attempting to store analysis for image hash: {image_hash}")
+        logging.info(f"Analysis data: {json.dumps(analysis, indent=2)}")
+        
+        cursor.execute('''
+            INSERT INTO image_analysis 
+            (hash, description, subjects, colors, mood, composition, visible_text, tags, categories, quality, unique_features)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                image_hash,
+                analysis.get('description', ''),
+                json.dumps(analysis.get('subjects', [])),
+                json.dumps(analysis.get('colors', [])),
+                json.dumps(analysis.get('mood', [])),
+                analysis.get('composition', ''),
+                json.dumps(analysis.get('text', [])),
+                json.dumps(analysis.get('tags', [])),
+                json.dumps(analysis.get('categories', [])),
+                analysis.get('quality', ''),
+                json.dumps(analysis.get('unique_features', []))
+          ))
+
+        conn.commit()
+        logging.info(f"Successfully stored analysis for image hash: {image_hash}")
+        return True, "Analysis stored successfully"
+    except sqlite3.IntegrityError as e:
+        logging.error(f"Integrity error while storing analysis for image hash {image_hash}: {str(e)}")
+        return False, f"Integrity error: {str(e)}"
+    except sqlite3.Error as e:
+        logging.error(f"Database error while storing analysis for image hash {image_hash}: {str(e)}")
+        logging.error(f"SQL query: {cursor.statement}")
+        return False, f"Database error: {str(e)}"
+    except json.JSONDecodeError as e:
+        logging.error(f"JSON encoding error while storing analysis for image hash {image_hash}: {str(e)}")
+        return False, f"JSON encoding error: {str(e)}"
+    except Exception as e:
+        logging.error(f"Unexpected error while storing analysis for image hash {image_hash}: {str(e)}")
+        logging.error(f"Analysis data: {json.dumps(analysis, indent=2)}")
+        return False, f"Unexpected error: {str(e)}"
+    finally:
+        if conn:
+            conn.close()
 
 @app.route('/')
 def serve_react_app():
     return app.send_static_file('index.html')
 
 
+analyze_image_prompt = """
+Respond only in JSON format. Do not include any explanations or text outside of the JSON structure. Do not include additional json fields.
+Analyze this image and provide a detailed description in the following JSON format:
+{
+    "description": "A brief overall description of the image",
+    "subjects": ["List of main subjects or objects in the image"],
+    "colors": ["Dominant colors in the image"],
+    "mood": ["List of moods or atmospheres present in the image"],
+    "composition": "Brief description of the image composition",
+    "text": ["Any visible text in the image, each line of text"],
+    "tags": ["Relevant tags for the image"],
+    "categories": ["Best fitting categories (e.g., landscape, portrait, still life, action, abstract)"],
+    "quality": "Image quality assessment (e.g., high, medium, low)",
+    "unique_features": ["Any unique or standout features of the image"]
+}
+"""
+
+def extract_json_from_markdown(text):
+    # Try to find JSON block in markdown
+    json_match = re.search(r'```(?:json)?\s*([\s\S]*?)\s*```', text)
+    if json_match:
+        return json_match.group(1)
+    return text  # Return original text if no JSON block found
+
 @app.route('/api/v1/analyze-image/<int:image_id>', methods=['POST'])
 def analyze_image(image_id):
-    conn = None
     try:
-        conn = create_connection()
-        cursor = conn.cursor()
-        
-        # Get the image hash and path
-        cursor.execute('SELECT hash, file_path FROM files WHERE id = ?', (image_id,))
-        result = cursor.fetchone()
-        
-        if not result:
-            return jsonify({"error": "Image not found", "details": f"No image found with id {image_id}"}), 404
-        
-        image_hash, file_path = result
-        
-        # Check if analysis already exists
-        cursor.execute('''
-        SELECT description, subjects, colors, mood, composition, visible_text, tags, categories, quality, unique_features
-        FROM image_analysis 
-        WHERE hash = ?
-        ''', (image_hash,))
-        existing_analysis = cursor.fetchone()
+        data = request.json
+        service = data.get('service', 'claude').lower()
+        model = data.get('model', 'claude-3-5-sonnet-20240620' if service == 'claude' else 'llava')
+
+        logging.info(f"Analyzing image with ID: {image_id}")
+        logging.info(f"Service: {service}")
+        logging.info(f"Model: {model}")
+
+        existing_analysis, image_hash, file_path = get_image_analysis(image_id)
         
         if existing_analysis:
-            analysis = {
-                'description': existing_analysis['description'],
-                'subjects': json.loads(existing_analysis['subjects']) if existing_analysis['subjects'] else None,
-                'colors': json.loads(existing_analysis['colors']) if existing_analysis['colors'] else None,
-                'mood': json.loads(existing_analysis['mood']) if existing_analysis['mood'] else None,
-                'composition': existing_analysis['composition'],
-                'visible_text': existing_analysis['visible_text'],
-                'tags': json.loads(existing_analysis['tags']) if existing_analysis['tags'] else None,
-                'categories': json.loads(existing_analysis['categories']) if existing_analysis['categories'] else None,
-                'quality': existing_analysis['quality'],
-                'unique_features': json.loads(existing_analysis['unique_features']) if existing_analysis['unique_features'] else None
-            }
-            return jsonify({"analysis": analysis}), 200
+            return jsonify({"analysis": existing_analysis}), 200
         
-        # Image processing code
-        with Image.open(file_path) as img:
-            # Convert image to RGB if it's not
-            if img.mode != 'RGB':
-                img = img.convert('RGB')
-            
-            # Resize image if it's too large
-            max_size = 1024
-            if max(img.size) > max_size:
-                img.thumbnail((max_size, max_size))
-            
-            # Convert image to base64
-            buffered = io.BytesIO()
-            img.save(buffered, format="JPEG")
-            base64_image = base64.b64encode(buffered.getvalue()).decode('utf-8')
+        base64_image = prepare_image_for_analysis(file_path)
         
-        try:
+        if service == 'claude':
             response = anthropic_client.messages.create(
-                model="claude-3-5-sonnet-20240620",
+                model=model,
                 max_tokens=1024,
                 messages=[
                     {
@@ -274,86 +367,53 @@ def analyze_image(image_id):
                             },
                             {
                                 "type": "text",
-                                "text": """
-                                Respond only in JSON format. Do not include any explanations or text outside of the JSON structure.
-                                Analyze this image and provide a detailed description in the following JSON format:
-                                {
-                                    "description": "A brief overall description of the image",
-                                    "subjects": ["List of main subjects or objects in the image"],
-                                    "colors": ["Dominant colors in the image"],
-                                    "mood": ["List of moods or atmospheres present in the image"],
-                                    "composition": "Brief description of the image composition",
-                                    "text": ["Any visible text in the image, each line of text"],
-                                    "tags": ["Relevant tags for the image"],
-                                    "categories": ["Best fitting categories (e.g., landscape, portrait, still life, action, abstract)"],
-                                    "quality": "Image quality assessment (e.g., high, medium, low)",
-                                    "uniqueFeatures": ["Any unique or standout features of the image"]
-                                }
-                                """
+                                "text": analyze_image_prompt
                             }
                         ]
                     }
                 ]
             )
-
-            # Extract the content from the response
             analysis_text = response.content[0].text
-            structured_analysis = json.loads(analysis_text)
-                        # Validate the structure of the analysis
-            required_fields = ['description', 'subjects', 'colors', 'mood', 'composition', 'text', 'tags', 'categories', 'quality', 'uniqueFeatures']
-            if not all(field in structured_analysis for field in required_fields):
-                raise ValueError("Generated analysis is missing required fields")
+        elif service == 'ollama':
+            ollama_url = "http://localhost:11434/api/generate"
+            headers = {"Content-Type": "application/json"}
+            payload = {
+                "model": model,
+                "stream": False,
+                "prompt": analyze_image_prompt,
+                "images": [base64_image]
+            }
+            response = requests.post(ollama_url, json=payload)
+            response.raise_for_status()
+            analysis_text = response.json()['response']
+        else:
+            return jsonify({"error": "Invalid service specified"}), 400
 
-            # Ensure array fields are actually arrays
-            array_fields = ['subjects', 'colors', 'mood', 'tags', 'categories', 'uniqueFeatures', 'text']
-            for field in array_fields:
-                if not isinstance(structured_analysis[field], list):
-                    structured_analysis[field] = [structured_analysis[field]]
+        logging.info(f"Raw analysis text: {analysis_text}")
 
-        except json.JSONDecodeError:
-            logger.error("Failed to parse Anthropic API response as JSON")
-            return jsonify({"error": "Failed to parse image analysis result"}), 500
-        except ValueError as ve:
-            logger.error(f"Invalid analysis structure: {str(ve)}")
-            return jsonify({"error": "Invalid analysis structure", "details": str(ve)}), 500
-        except Exception as e:
-            logger.error(f"Anthropic API request failed: {str(e)}")
-            return jsonify({"error": "Failed to analyze image", "details": str(e)}), 500
+        # Extract JSON from markdown if necessary
+        json_text = extract_json_from_markdown(analysis_text)
+        logging.info(f"Extracted JSON text: {json_text}")
 
-    # Store the analysis result
-        cursor.execute('''
-            INSERT INTO image_analysis 
-            (hash, description, subjects, colors, mood, composition, visible_text, tags, categories, quality, unique_features)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                image_hash,
-                structured_analysis['description'],
-                json.dumps(structured_analysis['subjects']),
-                json.dumps(structured_analysis['colors']),
-                json.dumps(structured_analysis['mood']),
-                structured_analysis['composition'],
-                json.dumps(structured_analysis['text']),
-                json.dumps(structured_analysis['tags']),
-                json.dumps(structured_analysis['categories']),
-                structured_analysis['quality'],
-                json.dumps(structured_analysis['uniqueFeatures'])
-          ))
-        conn.commit()
-    
+        try:
+            structured_analysis = json.loads(json_text)
+        except json.JSONDecodeError as e:
+            logging.error(f"Failed to parse JSON: {str(e)}")
+            logging.error(f"Invalid JSON: {json_text}")
+            return jsonify({"error": "Failed to parse analysis result"}), 500
+
+        logging.info(f"Image hash: {image_hash}")
+        logging.info(f"Analysis data before storage: {json.dumps(structured_analysis, indent=2)}")
+
+        success, message = store_image_analysis(image_hash, structured_analysis)
+        if not success:
+            logging.error(f"Failed to store image analysis: {message}")
+
         return jsonify({"analysis": structured_analysis}), 200
 
     except Exception as e:
-        error_details = traceback.format_exc()
-        logger.error(f"Error analyzing image: {str(e)}\n{error_details}")
-        return jsonify({
-            "error": "Failed to analyze image",
-            "message": str(e),
-            "details": error_details
-        }), 500
-    finally:
-        if conn:
-            conn.close()
-
+        logging.error(f"Error analyzing image: {str(e)}", exc_info=True)
+        return jsonify({"error": str(e)}), 500
 
 @app.route('/api/v1/index-files', methods=['POST'])
 def index_files_handler():
@@ -381,7 +441,6 @@ def get_files_handler():
     ''')
     
     rows = cursor.fetchall()
-    print(f"Number of rows fetched: {len(rows)}")  # Debug print
     
     def parse_json_field(field):
         if field:
@@ -390,6 +449,8 @@ def get_files_handler():
             except json.JSONDecodeError:
                 return None
         return None
+
+
 
     files = [{
         **dict(row),

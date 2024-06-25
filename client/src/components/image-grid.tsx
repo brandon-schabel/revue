@@ -21,13 +21,18 @@ type Filters = {
     // uniqueFeatures: string[];
 };
 
+const isDev = process.env.NODE_ENV === "development";
+
 
 export const ImageGrid = () => {
     const { data: files, isLoading, error } = useFiles();
     const [sortBy, setSortBy] = useState<SortOption>("name");
     const [selectedFormats, setSelectedFormats] = useState<string[]>([]);
     const [searchTerm, setSearchTerm] = useState("");
-    const analyzeImage = useAnalyzeImage();
+    const analyzeImage = useAnalyzeImage({
+        service: "ollama",
+        model: "llava"
+    });
     const [filters, setFilters] = useState<Filters>({
         moods: [],
         colors: [],
@@ -67,7 +72,7 @@ export const ImageGrid = () => {
                 if (file.analysis) {
                     newFilters.moods.push(...file?.analysis?.mood || []);
                     newFilters.colors.push(...file?.analysis?.colors || []);
-                    newFilters.categories.push(...file?.analysis?.categories|| []);
+                    newFilters.categories.push(...file?.analysis?.categories || []);
                     newFilters.qualities.push(file.analysis.quality);
                     // newFilters.compositions.push(file.analysis.composition);
                     newFilters.subjects.push(...file?.analysis?.subjects || []);
@@ -169,6 +174,9 @@ export const ImageGrid = () => {
     if (isLoading) return <div>Loading...</div>;
     if (error) return <div>Error loading images</div>;
 
+
+
+
     return (
         <div>
             <div className="mb-4 flex flex-wrap gap-4">
@@ -234,51 +242,54 @@ export const ImageGrid = () => {
                 ))}
             </div>
             <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
-                {sortedAndFilteredFiles.map((file: IndexedFileMetadata) => (
-                    <Dialog key={file.file_path}>
-                        <DialogTrigger asChild>
-                            <div className="relative aspect-square cursor-pointer">
-                                <img
-                                    src={file.thumbnail_path}
-                                    alt={file.file_name}
-                                    className="object-cover w-full h-full rounded-lg"
-                                />
-                                <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm truncate">
-                                    {file.file_name}
+                {sortedAndFilteredFiles.map((file: IndexedFileMetadata) => {
+                    console.log({ file })
+                    return (
+                        <Dialog key={file.file_path}>
+                            <DialogTrigger asChild>
+                                <div className="relative aspect-square cursor-pointer">
+                                    <img
+                                        src={isDev ? `http://localhost:8080/${file.thumbnail_path}` : file.thumbnail_path}
+                                        alt={file.file_name}
+                                        className="object-cover w-full h-full rounded-lg"
+                                    />
+                                    <div className="absolute bottom-0 left-0 right-0 bg-black bg-opacity-50 text-white p-2 text-sm truncate">
+                                        {file.file_name}
+                                    </div>
+                                    <Button
+                                        className="absolute top-2 right-2"
+                                        onClick={(e) => {
+                                            e.stopPropagation();
+                                            handleAnalyze(file.id);
+                                        }}
+                                        disabled={analyzeImage.isPending || !!file.analysis}
+                                    >
+                                        {file.analysis ? "Analyzed" : "Analyze"}
+                                    </Button>
                                 </div>
-                                <Button
-                                    className="absolute top-2 right-2"
-                                    onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleAnalyze(file.id);
-                                    }}
-                                    disabled={analyzeImage.isPending || !!file.analysis}
-                                >
-                                    {file.analysis ? "Analyzed" : "Analyze"}
-                                </Button>
-                            </div>
-                        </DialogTrigger>
-                        <DialogContent className="max-w-3xl">
-                            <DialogHeader>
-                                <DialogTitle>{file.file_name}</DialogTitle>
-                            </DialogHeader>
-                            <div className="grid grid-cols-2 gap-4">
-                                <img
-                                    src={file.thumbnail_path}
-                                    alt={file.file_name}
-                                    className="w-full h-auto rounded-lg"
-                                />
-                                <div className="overflow-y-auto max-h-[60vh]">
-                                    {file.analysis ? (
-                                        renderAnalysisData(file.analysis)
-                                    ) : (
-                                        <p>No analysis data available.</p>
-                                    )}
+                            </DialogTrigger>
+                            <DialogContent className="max-w-3xl">
+                                <DialogHeader>
+                                    <DialogTitle>{file.file_name}</DialogTitle>
+                                </DialogHeader>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <img
+                                        src={isDev ? `http://localhost:8080/${file.thumbnail_path}` : file.thumbnail_path}
+                                        alt={file.file_name}
+                                        className="w-full h-auto rounded-lg"
+                                    />
+                                    <div className="overflow-y-auto max-h-[60vh]">
+                                        {file.analysis ? (
+                                            renderAnalysisData(file.analysis)
+                                        ) : (
+                                            <p>No analysis data available.</p>
+                                        )}
+                                    </div>
                                 </div>
-                            </div>
-                        </DialogContent>
-                    </Dialog>
-                ))}
+                            </DialogContent>
+                        </Dialog>
+                    )
+                })}
             </div>
         </div>
     );

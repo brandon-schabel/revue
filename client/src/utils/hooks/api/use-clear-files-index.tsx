@@ -1,9 +1,10 @@
 import { useMutation, } from "@tanstack/react-query";
 import { useInvalidateDuplicateFiles } from "./use-find-duplicate-files";
 import { useInvalidateFiles } from "./use-files";
+import { fetchServer } from "../fetch-server";
 
 const clearFilesIndex = async (): Promise<{ message: string }> => {
-    const response = await fetch("/api/v1/clear-files-index", {
+    const response = await fetchServer("/clear-files-index", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

@@ -1,8 +1,9 @@
 import { useMutation } from "@tanstack/react-query";
 import { useInvalidateFiles } from "./use-files";
+import { fetchServer } from "../fetch-server";
 
 const deleteFile = async (filePath: string): Promise<{ message: string }> => {
-    const response = await fetch("/api/v1/delete-file", {
+    const response = await fetchServer("/delete-file", {
         method: "POST",
         headers: {
             "Content-Type": "application/json",

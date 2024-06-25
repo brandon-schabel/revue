@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query"
 import type { IndexedFileMetadata } from "../../../types/types"
 import { useInvalidator } from "./use-invalidator"
+import { fetchServer } from "../fetch-server"
 
 export const getFiles = async () => {
-    const fetcher = fetch("/api/v1/files", {
+    const fetcher = fetchServer("/files", {
         headers: {
             "Content-Type": "application/json",
         }

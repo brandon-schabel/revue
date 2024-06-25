@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { Drive } from "../../../types/types";
 import { useInvalidator } from "./use-invalidator";
+import { fetchServer } from "../fetch-server";
 
 export const getDrives = async (): Promise<Drive[]> => {
-    const response = await fetch("/api/v1/list-drives", {
+    const response = await fetchServer("/list-drives", {
         headers: {
             "Content-Type": "application/json",
         }

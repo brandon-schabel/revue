@@ -1,9 +1,10 @@
 import { useQuery } from "@tanstack/react-query";
 import type { DirectoryContents } from "../../../types/types";
 import { useInvalidator } from "./use-invalidator";
+import { fetchServer } from "../fetch-server";
 
 export const getDirectoryContents = async (path: string) => {
-	const fetcher = fetch("/api/v1/list-directory", {
+	const fetcher = fetchServer("/list-directory", {
 		method: "POST",
 		body: JSON.stringify({ path }),
 		headers: {
